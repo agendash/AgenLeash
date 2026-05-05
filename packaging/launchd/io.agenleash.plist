@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>io.agenleash</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>__BINARY__</string>
+  </array>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>AGENLEASH_ENV_FILE</key>
+    <string>__ENV_FILE__</string>
+    <key>PATH</key>
+    <string>__PATH__</string>
+  </dict>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>KeepAlive</key>
+  <true/>
+
+  <key>WorkingDirectory</key>
+  <string>__WORKING_DIRECTORY__</string>
+
+  <key>StandardOutPath</key>
+  <string>__LOG_DIRECTORY__/agenleash.log</string>
+
+  <key>StandardErrorPath</key>
+  <string>__LOG_DIRECTORY__/agenleash.err.log</string>
+</dict>
+</plist>

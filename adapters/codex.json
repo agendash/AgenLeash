@@ -1,0 +1,75 @@
+{
+  "apiVersion": "agenleash/v1alpha1",
+  "kind": "AdapterSpec",
+  "metadata": {
+    "name": "codex",
+    "displayName": "OpenAI Codex CLI",
+    "schemaVersion": 1,
+    "adapterRevision": 2
+  },
+  "spec": {
+    "agentFamily": "codex",
+    "detection": {
+      "binaryNames": ["codex"],
+      "versionStrategy": {
+        "type": "command",
+        "command": ["codex", "--version"],
+        "regex": "(?P<version>\\d+\\.\\d+\\.\\d+)",
+        "source": "stdout"
+      },
+      "fallbackProfile": "stable"
+    },
+    "runtime": {
+      "mode": "stdio",
+      "entrypoint": "codex",
+      "args": ["exec", "--json", "--skip-git-repo-check", "--dangerously-bypass-approvals-and-sandbox"],
+      "env": {}
+    },
+    "cwdPolicy": {
+      "mode": "required",
+      "requireGitRoot": false,
+      "resolveSymlink": true
+    },
+    "capabilities": {
+      "requiresTTY": false,
+      "supportsResume": true,
+      "supportsInterrupt": true,
+      "supportsNativeConversationId": true
+    },
+    "features": {
+      "jsonEventStream": true,
+      "streamingText": true,
+      "toolCallEvents": false,
+      "structuredPatch": false,
+      "planMode": false
+    },
+    "conversation": {
+      "mode": "process_only",
+      "extractors": [
+        {
+          "type": "regex",
+          "source": "stdout",
+          "pattern": "\"type\"\\s*:\\s*\"thread\\.started\"[^\\n]*\"thread_id\"\\s*:\\s*\"(?P<id>[^\"]+)\""
+        }
+      ]
+    },
+    "workspace": {
+      "mode": "cwd_plus_git"
+    },
+    "eventParser": {
+      "type": "jsonl_events",
+      "profile": "codex_exec"
+    },
+    "versionProfiles": [
+      {
+        "name": "stable",
+        "match": ">=0.1.0",
+        "overrides": {
+          "features": {
+            "streamingText": true
+          }
+        }
+      }
+    ]
+  }
+}

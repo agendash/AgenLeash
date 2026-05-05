@@ -1,0 +1,139 @@
+{
+  "apiVersion": "agenleash/v1alpha1",
+  "kind": "AdapterSpec",
+  "metadata": {
+    "name": "claudecode",
+    "displayName": "Claude Code",
+    "schemaVersion": 1,
+    "adapterRevision": 3
+  },
+  "spec": {
+    "agentFamily": "claudecode",
+    "detection": {
+      "binaryNames": ["claude", "claudecode"],
+      "versionStrategy": {
+        "type": "command",
+        "command": ["claude", "--version"],
+        "regex": "(?P<version>\\d+\\.\\d+\\.\\d+)",
+        "source": "stdout"
+      },
+      "fallbackProfile": "legacy"
+    },
+    "runtime": {
+      "mode": "pty",
+      "entrypoint": "claude",
+      "args": [],
+      "env": {
+        "CLAUDE_CODE_HIDE_DEBUG": "1"
+      }
+    },
+    "cwdPolicy": {
+      "mode": "required",
+      "requireGitRoot": true,
+      "resolveSymlink": true
+    },
+    "capabilities": {
+      "requiresTTY": true,
+      "supportsResume": false,
+      "supportsInterrupt": true,
+      "supportsNativeConversationId": false
+    },
+    "features": {
+      "streamingText": true,
+      "jsonEventStream": true,
+      "fileReferences": true,
+      "toolCallEvents": false,
+      "planMode": false,
+      "x.claudecode.reviewLoop": false
+    },
+    "conversation": {
+      "mode": "process_only",
+      "extractors": [
+        {
+          "type": "regex",
+          "source": "stdout",
+          "pattern": "Conversation ID: (?P<id>[A-Za-z0-9_-]+)"
+        }
+      ]
+    },
+    "workspace": {
+      "mode": "cwd_plus_git"
+    },
+    "eventParser": {
+      "type": "json_events",
+      "profile": "default"
+    },
+    "versionProfiles": [
+      {
+        "name": "legacy",
+        "match": "<1.10.0",
+        "overrides": {
+          "features": {
+            "toolCallEvents": false,
+            "structuredPatch": false,
+            "x.claudecode.reviewLoop": false
+          },
+          "conversation": {
+            "mode": "process_only"
+          },
+          "eventParser": {
+            "type": "ansi_rules",
+            "profile": "legacy_compat"
+          }
+        }
+      },
+      {
+        "name": "stable",
+        "match": ">=1.10.0 <2.0.0",
+        "overrides": {
+          "capabilities": {
+            "supportsResume": true,
+            "supportsNativeConversationId": true
+          },
+          "features": {
+            "toolCallEvents": true,
+            "structuredPatch": true,
+            "planMode": true,
+            "x.claudecode.reviewLoop": true
+          },
+          "conversation": {
+            "mode": "native_id"
+          },
+          "workspace": {
+            "mode": "cwd_plus_git"
+          },
+          "eventParser": {
+            "type": "json_events",
+            "profile": "stable"
+          }
+        }
+      },
+      {
+        "name": "v2",
+        "match": ">=2.0.0 <3.0.0",
+        "overrides": {
+          "capabilities": {
+            "supportsResume": true,
+            "supportsNativeConversationId": true
+          },
+          "features": {
+            "toolCallEvents": true,
+            "structuredPatch": true,
+            "planMode": true,
+            "x.claudecode.reviewLoop": true
+          },
+          "conversation": {
+            "mode": "native_id"
+          },
+          "workspace": {
+            "mode": "cwd_plus_git"
+          },
+          "eventParser": {
+            "type": "json_events",
+            "profile": "v2"
+          }
+        }
+      }
+    ]
+  }
+}

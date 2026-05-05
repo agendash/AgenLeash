@@ -1,0 +1,18 @@
+[Unit]
+Description=AgenLeash Agent Gateway
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=__USER__
+Group=__GROUP__
+WorkingDirectory=__WORKING_DIRECTORY__
+Environment=AGENLEASH_ENV_FILE=__ENV_FILE__
+ExecStart=__BINARY__
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target
