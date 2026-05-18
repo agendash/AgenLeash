@@ -1621,12 +1621,16 @@ type opencodeRunEnvelope struct {
 }
 
 type claudeCodeStreamEnvelope struct {
-	Type      string `json:"type"`
-	Subtype   string `json:"subtype"`
-	SessionID string `json:"session_id"`
-	Result    string `json:"result"`
-	Error     string `json:"error"`
-	IsError   bool   `json:"is_error"`
+	Type         string  `json:"type"`
+	Subtype      string  `json:"subtype"`
+	SessionID    string  `json:"session_id"`
+	Result       string  `json:"result"`
+	Error        string  `json:"error"`
+	IsError      bool    `json:"is_error"`
+	Attempt      int     `json:"attempt"`
+	MaxRetries   int     `json:"max_retries"`
+	RetryDelayMS float64 `json:"retry_delay_ms"`
+	ErrorStatus  string  `json:"error_status"`
 }
 
 func (a *App) consumeCodexJSONOutput(sess *session.Session, sessionID string, data []byte, remainder string) (string, bool) {
@@ -1785,14 +1789,36 @@ func (a *App) consumeClaudeCodeJSONOutput(sess *session.Session, sessionID strin
 }
 
 func claudeCodeResultText(envelope claudeCodeStreamEnvelope) string {
-	if !strings.EqualFold(strings.TrimSpace(envelope.Type), "result") {
-		return ""
-	}
-	if text := strings.TrimSpace(envelope.Result); text != "" {
-		return text
-	}
-	if envelope.IsError {
-		return strings.TrimSpace(envelope.Error)
+	switch strings.ToLower(strings.TrimSpace(envelope.Type)) {
+	case "result":
+		if text := strings.TrimSpace(envelope.Result); text != "" {
+			return text
+		}
+		if envelope.IsError {
+			return strings.TrimSpace(envelope.Error)
+		}
+	case "system":
+		switch strings.ToLower(strings.TrimSpace(envelope.Subtype)) {
+		case "error":
+			return strings.TrimSpace(envelope.Error)
+		case "api_retry":
+			detail := strings.TrimSpace(envelope.Error)
+			if status := strings.TrimSpace(envelope.ErrorStatus); status != "" {
+				if detail != "" {
+					detail += " "
+				}
+				detail += "(" + status + ")"
+			}
+			if detail == "" {
+				detail = "upstream request failed"
+			}
+			if envelope.Attempt > 0 && envelope.MaxRetries > 0 {
+				return fmt.Sprintf("Claude API retry %d/%d: %s", envelope.Attempt, envelope.MaxRetries, detail)
+			}
+			return "Claude API retry: " + detail
+		case "api_error":
+			return strings.TrimSpace(envelope.Error)
+		}
 	}
 	return ""
 }

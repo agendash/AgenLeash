@@ -822,6 +822,71 @@ func TestConsumeClaudeCodeJSONOutputPublishesResultAndBindsSession(t *testing.T)
 	}
 }
 
+func TestConsumeClaudeCodeJSONOutputPublishesAPIRetry(t *testing.T) {
+	rt := &capturingRuntime{events: closedRuntimeEvents()}
+	sess, err := session.New(
+		context.Background(),
+		session.StartRequest{
+			ID:             "sess_claude_retry",
+			Adapter:        "claudecode",
+			RuntimeMode:    "stdio",
+			ConversationID: "conv_claude_retry",
+			WorkspaceID:    "ws_claude_retry",
+			WorkspacePath:  t.TempDir(),
+		},
+		rt,
+		16,
+	)
+	if err != nil {
+		t.Fatalf("session.New() error = %v", err)
+	}
+
+	hub := event.NewHub(32)
+	app := &App{
+		Store: store.NewMemoryStore(),
+		Hub:   hub,
+	}
+
+	sub := hub.Subscribe("sess_claude_retry")
+	defer sub.Close()
+
+	remainder, consumed := app.consumeClaudeCodeJSONOutput(
+		sess,
+		"sess_claude_retry",
+		[]byte("{\"type\":\"system\",\"subtype\":\"api_retry\",\"attempt\":1,\"max_retries\":10,\"error\":\"unknown\",\"session_id\":\"claude-retry-123\"}\n"),
+		"",
+	)
+	if remainder != "" {
+		t.Fatalf("remainder = %q, want empty", remainder)
+	}
+	if !consumed {
+		t.Fatal("consumed = false, want true")
+	}
+
+	want := "Claude API retry 1/10: unknown"
+	if got := sess.Snapshot().LastOutputPreview; got != want {
+		t.Fatalf("last output preview = %q, want %q", got, want)
+	}
+
+	foundDelta := false
+	for len(sub.Recent) > 0 {
+		evt := sub.Recent[0]
+		sub.Recent = sub.Recent[1:]
+		if evt.MsgType == event.MsgTypeMessageDelta && evt.Delta == want {
+			foundDelta = true
+		}
+	}
+	for len(sub.C) > 0 {
+		evt := <-sub.C
+		if evt.MsgType == event.MsgTypeMessageDelta && evt.Delta == want {
+			foundDelta = true
+		}
+	}
+	if !foundDelta {
+		t.Fatal("did not receive assistant message delta for claude api retry")
+	}
+}
+
 func TestPumpSessionSuppressesClaudeCodeUnstructuredRuntimeOutput(t *testing.T) {
 	rtEvents := make(chan agenruntime.Event, 2)
 	rt := &capturingRuntime{events: rtEvents}

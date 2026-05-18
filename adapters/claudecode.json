@@ -98,7 +98,8 @@
               "--dangerously-skip-permissions"
             ],
             "env": {
-              "CLAUDE_CODE_HIDE_DEBUG": "1"
+              "CLAUDE_CODE_HIDE_DEBUG": "1",
+              "API_TIMEOUT_MS": "30000"
             }
           },
           "capabilities": {
@@ -140,7 +141,8 @@
               "--dangerously-skip-permissions"
             ],
             "env": {
-              "CLAUDE_CODE_HIDE_DEBUG": "1"
+              "CLAUDE_CODE_HIDE_DEBUG": "1",
+              "API_TIMEOUT_MS": "30000"
             }
           },
           "capabilities": {
