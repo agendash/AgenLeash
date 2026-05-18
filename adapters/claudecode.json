@@ -86,7 +86,22 @@
         "name": "stable",
         "match": ">=1.10.0 <2.0.0",
         "overrides": {
+          "runtime": {
+            "mode": "stdio",
+            "entrypoint": "claude",
+            "args": [
+              "-p",
+              "--verbose",
+              "--output-format",
+              "stream-json",
+              "--dangerously-skip-permissions"
+            ],
+            "env": {
+              "CLAUDE_CODE_HIDE_DEBUG": "1"
+            }
+          },
           "capabilities": {
+            "requiresTTY": false,
             "supportsResume": true,
             "supportsNativeConversationId": true
           },
@@ -112,7 +127,22 @@
         "name": "v2",
         "match": ">=2.0.0 <3.0.0",
         "overrides": {
+          "runtime": {
+            "mode": "stdio",
+            "entrypoint": "claude",
+            "args": [
+              "-p",
+              "--verbose",
+              "--output-format",
+              "stream-json",
+              "--dangerously-skip-permissions"
+            ],
+            "env": {
+              "CLAUDE_CODE_HIDE_DEBUG": "1"
+            }
+          },
           "capabilities": {
+            "requiresTTY": false,
             "supportsResume": true,
             "supportsNativeConversationId": true
           },

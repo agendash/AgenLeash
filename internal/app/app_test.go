@@ -32,7 +32,16 @@ func TestBuildRuntimeArgsForClaudeCode(t *testing.T) {
 	}
 
 	args := buildRuntimeArgs(spec, effective, model.StartModeResume, "conv_123", []string{"--debug"})
-	want := []string{"--resume", "conv_123", "--debug"}
+	want := []string{
+		"-p",
+		"--verbose",
+		"--output-format",
+		"stream-json",
+		"--dangerously-skip-permissions",
+		"--resume",
+		"conv_123",
+		"--debug",
+	}
 	if len(args) != len(want) {
 		t.Fatalf("args length = %d, want %d (%v)", len(args), len(want), args)
 	}
@@ -146,6 +155,7 @@ func TestBuildRuntimeArgsStripsBaselineResumeFlags(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Resolve() error = %v", err)
 	}
+	effective.Runtime.Args = []string{"--resume", "old", "--verbose"}
 
 	args := buildRuntimeArgs(spec, effective, model.StartModeNew, "", nil)
 	want := []string{"--verbose"}
@@ -236,8 +246,8 @@ func TestHandleStartSessionDetachesRuntimeFromRequestContext(t *testing.T) {
 		t.Fatal("runtime context was canceled with the request context")
 	default:
 	}
-	if snapshot.RuntimeMode != "pty" {
-		t.Fatalf("RuntimeMode = %q, want pty", snapshot.RuntimeMode)
+	if snapshot.RuntimeMode != "stdio" {
+		t.Fatalf("RuntimeMode = %q, want stdio", snapshot.RuntimeMode)
 	}
 }
 
@@ -249,6 +259,12 @@ func TestHandleStartSessionRejectsMissingEntrypoint(t *testing.T) {
 	spec.Spec.Runtime.Entrypoint = &entrypoint
 	spec.Spec.Detection.BinaryNames = []string{entrypoint}
 	spec.Spec.Detection.VersionStrategy.Command = []string{entrypoint, "--version"}
+	for i := range spec.Spec.VersionProfiles {
+		if spec.Spec.VersionProfiles[i].Overrides.Runtime == nil {
+			continue
+		}
+		spec.Spec.VersionProfiles[i].Overrides.Runtime.Entrypoint = &entrypoint
+	}
 
 	app := &App{
 		Config: Config{
@@ -658,6 +674,149 @@ func TestPumpSessionSuppressesCodexUnstructuredRuntimeOutput(t *testing.T) {
 		if evt.MsgType == event.MsgTypeMessageDelta {
 			t.Fatalf("unexpected message delta for runtime noise: %q", evt.Delta)
 		}
+	}
+}
+
+func TestConsumeClaudeCodeJSONOutputPublishesResultAndBindsSession(t *testing.T) {
+	rt := &capturingRuntime{events: closedRuntimeEvents()}
+	sess, err := session.New(
+		context.Background(),
+		session.StartRequest{
+			ID:             "sess_claude_live",
+			Adapter:        "claudecode",
+			RuntimeMode:    "stdio",
+			ConversationID: "conv_claude_live",
+			WorkspaceID:    "ws_claude_live",
+			WorkspacePath:  t.TempDir(),
+		},
+		rt,
+		16,
+	)
+	if err != nil {
+		t.Fatalf("session.New() error = %v", err)
+	}
+
+	hub := event.NewHub(32)
+	app := &App{
+		Store: store.NewMemoryStore(),
+		Hub:   hub,
+	}
+
+	sub := hub.Subscribe("sess_claude_live")
+	defer sub.Close()
+
+	remainder, consumed := app.consumeClaudeCodeJSONOutput(
+		sess,
+		"sess_claude_live",
+		[]byte("{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"claude-native-123\"}\n{\"type\":\"system\",\"subtype\":\"status\",\"message\":\"requesting\"}\n{\"type\":\"result\",\"subtype\":\"success\",\"session_id\":\"claude-native-123\",\"result\":\"AGENDASH_SMOKE_OK\"}\n"),
+		"",
+	)
+	if remainder != "" {
+		t.Fatalf("remainder = %q, want empty", remainder)
+	}
+	if !consumed {
+		t.Fatal("consumed = false, want true")
+	}
+
+	snapshot := sess.Snapshot()
+	if snapshot.NativeConversationID != "claude-native-123" {
+		t.Fatalf("native conversation id = %q, want claude-native-123", snapshot.NativeConversationID)
+	}
+	if snapshot.LastOutputPreview != "AGENDASH_SMOKE_OK" {
+		t.Fatalf("last output preview = %q, want AGENDASH_SMOKE_OK", snapshot.LastOutputPreview)
+	}
+
+	foundDelta := false
+	for len(sub.Recent) > 0 {
+		evt := sub.Recent[0]
+		sub.Recent = sub.Recent[1:]
+		if evt.MsgType == event.MsgTypeMessageDelta && evt.Delta == "AGENDASH_SMOKE_OK" {
+			foundDelta = true
+		}
+		if evt.MsgType == event.MsgTypeMessageDelta && strings.Contains(evt.Delta, "requesting") {
+			t.Fatalf("unexpected status delta: %q", evt.Delta)
+		}
+	}
+	for len(sub.C) > 0 {
+		evt := <-sub.C
+		if evt.MsgType == event.MsgTypeMessageDelta && evt.Delta == "AGENDASH_SMOKE_OK" {
+			foundDelta = true
+		}
+		if evt.MsgType == event.MsgTypeMessageDelta && strings.Contains(evt.Delta, "requesting") {
+			t.Fatalf("unexpected status delta: %q", evt.Delta)
+		}
+	}
+	if !foundDelta {
+		t.Fatal("did not receive assistant message delta for claude result")
+	}
+}
+
+func TestPumpSessionSuppressesClaudeCodeUnstructuredRuntimeOutput(t *testing.T) {
+	rtEvents := make(chan agenruntime.Event, 2)
+	rt := &capturingRuntime{events: rtEvents}
+	sess, err := session.New(
+		context.Background(),
+		session.StartRequest{
+			ID:             "sess_claude_noise",
+			Adapter:        "claudecode",
+			RuntimeMode:    "stdio",
+			ConversationID: "conv_claude_noise",
+			WorkspaceID:    "ws_claude_noise",
+			WorkspacePath:  t.TempDir(),
+		},
+		rt,
+		16,
+	)
+	if err != nil {
+		t.Fatalf("session.New() error = %v", err)
+	}
+
+	hub := event.NewHub(32)
+	app := &App{
+		Store: store.NewMemoryStore(),
+		Hub:   hub,
+	}
+	sub := hub.Subscribe("sess_claude_noise")
+	defer sub.Close()
+
+	rtEvents <- agenruntime.Event{
+		Kind: agenruntime.EventKindOutput,
+		Data: []byte("Claude Code v2.1.119\n> Reply with exactly AGENDASH_SMOKE_OK.\n* Manifesting...\n"),
+	}
+	close(rtEvents)
+
+	app.pumpSession(sess, claudeCodeJSONEffectiveSpec())
+
+	if got := sess.Snapshot().LastOutputPreview; got != "" {
+		t.Fatalf("last output preview = %q, want empty", got)
+	}
+
+	for len(sub.Recent) > 0 {
+		evt := sub.Recent[0]
+		sub.Recent = sub.Recent[1:]
+		if evt.MsgType == event.MsgTypeMessageDelta {
+			t.Fatalf("unexpected message delta for claude TUI noise: %q", evt.Delta)
+		}
+	}
+	for len(sub.C) > 0 {
+		evt := <-sub.C
+		if evt.MsgType == event.MsgTypeMessageDelta {
+			t.Fatalf("unexpected message delta for claude TUI noise: %q", evt.Delta)
+		}
+	}
+}
+
+func TestSanitizeOutputTextDropsClaudeTTYNoise(t *testing.T) {
+	raw := []byte("\x1b]0;⠐ Claude Code\x07\r\x1b[2K✶\r\n]0;⠐ Claude Code\nReal answer\n")
+	if got := sanitizeOutputText(raw); got != "Real answer" {
+		t.Fatalf("sanitizeOutputText() = %q, want Real answer", got)
+	}
+}
+
+func TestSanitizeOutputTextKeepsClaudeCodeInRealText(t *testing.T) {
+	raw := []byte("Use Claude Code for this task.\n")
+	if got := sanitizeOutputText(raw); got != "Use Claude Code for this task." {
+		t.Fatalf("sanitizeOutputText() = %q", got)
 	}
 }
 
@@ -1184,6 +1343,18 @@ func codexJSONEffectiveSpec() adapter.EffectiveSpec {
 	parserProfile := "codex_exec"
 	return adapter.EffectiveSpec{
 		AdapterName: "codex",
+		EventParser: adapter.EventParserSpec{
+			Type:    &parserType,
+			Profile: &parserProfile,
+		},
+	}
+}
+
+func claudeCodeJSONEffectiveSpec() adapter.EffectiveSpec {
+	parserType := "json_events"
+	parserProfile := "v2"
+	return adapter.EffectiveSpec{
+		AdapterName: "claudecode",
 		EventParser: adapter.EventParserSpec{
 			Type:    &parserType,
 			Profile: &parserProfile,

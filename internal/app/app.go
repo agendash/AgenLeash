@@ -40,7 +40,10 @@ const (
 	managedHistoryBackfillWindow = 20 * time.Minute
 )
 
-var ansiRegexp = regexp.MustCompile(`\x1b\[[0-?]*[ -/]*[@-~]`)
+var (
+	ansiRegexp = regexp.MustCompile(`\x1b\[[0-?]*[ -/]*[@-~]`)
+	oscRegexp  = regexp.MustCompile(`\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)`)
+)
 
 type App struct {
 	Config   Config
@@ -944,6 +947,7 @@ func (a *App) pumpSession(sess *session.Session, spec adapter.EffectiveSpec) {
 	messageID := ""
 	codexJSONRemainder := ""
 	opencodeJSONRemainder := ""
+	claudeCodeJSONRemainder := ""
 
 	for evt := range sess.Events() {
 		snapshot := sess.Snapshot()
@@ -977,6 +981,20 @@ func (a *App) pumpSession(sess *session.Session, spec adapter.EffectiveSpec) {
 					sessionID,
 					evt.Data,
 					opencodeJSONRemainder,
+				)
+				snapshot = sess.Snapshot()
+				_ = a.persistSessionSnapshot(snapshot, false)
+				if consumed {
+					continue
+				}
+			}
+			if isClaudeCodeStreamJSON(spec) {
+				var consumed bool
+				claudeCodeJSONRemainder, consumed = a.consumeClaudeCodeJSONOutput(
+					sess,
+					sessionID,
+					evt.Data,
+					claudeCodeJSONRemainder,
 				)
 				snapshot = sess.Snapshot()
 				_ = a.persistSessionSnapshot(snapshot, false)
@@ -1051,6 +1069,15 @@ func (a *App) pumpSession(sess *session.Session, spec adapter.EffectiveSpec) {
 					sessionID,
 					[]byte("\n"),
 					opencodeJSONRemainder,
+				)
+				snapshot = sess.Snapshot()
+			}
+			if isClaudeCodeStreamJSON(spec) && strings.TrimSpace(claudeCodeJSONRemainder) != "" {
+				claudeCodeJSONRemainder, _ = a.consumeClaudeCodeJSONOutput(
+					sess,
+					sessionID,
+					[]byte("\n"),
+					claudeCodeJSONRemainder,
 				)
 				snapshot = sess.Snapshot()
 			}
@@ -1393,7 +1420,10 @@ func (a *App) shouldCloseInputAfterMessage(sessionID string) bool {
 	}
 	snapshot := sess.Snapshot()
 	adapterName := strings.ToLower(strings.TrimSpace(snapshot.Adapter))
-	return (adapterName == "codex" || adapterName == "opencode") &&
+	knownStdioAdapter := adapterName == "codex" ||
+		adapterName == "opencode" ||
+		adapterName == "claudecode"
+	return knownStdioAdapter &&
 		strings.EqualFold(strings.TrimSpace(snapshot.RuntimeMode), "stdio")
 }
 
@@ -1409,8 +1439,15 @@ func isOpencodeRunJSON(spec adapter.EffectiveSpec) bool {
 		strings.EqualFold(strings.TrimSpace(stringValue(spec.EventParser.Profile)), "opencode_run")
 }
 
+func isClaudeCodeStreamJSON(spec adapter.EffectiveSpec) bool {
+	return strings.EqualFold(strings.TrimSpace(spec.AdapterName), "claudecode") &&
+		strings.EqualFold(strings.TrimSpace(stringValue(spec.EventParser.Type)), "json_events") &&
+		(strings.EqualFold(strings.TrimSpace(stringValue(spec.EventParser.Profile)), "stable") ||
+			strings.EqualFold(strings.TrimSpace(stringValue(spec.EventParser.Profile)), "v2"))
+}
+
 func suppressUnstructuredRuntimeOutput(spec adapter.EffectiveSpec) bool {
-	return isCodexExecJSON(spec) || isOpencodeRunJSON(spec)
+	return isCodexExecJSON(spec) || isOpencodeRunJSON(spec) || isClaudeCodeStreamJSON(spec)
 }
 
 type codexExecEnvelope struct {
@@ -1435,6 +1472,15 @@ type opencodeRunEnvelope struct {
 		MessageID string `json:"messageID"`
 		SessionID string `json:"sessionID"`
 	} `json:"part"`
+}
+
+type claudeCodeStreamEnvelope struct {
+	Type      string `json:"type"`
+	Subtype   string `json:"subtype"`
+	SessionID string `json:"session_id"`
+	Result    string `json:"result"`
+	Error     string `json:"error"`
+	IsError   bool   `json:"is_error"`
 }
 
 func (a *App) consumeCodexJSONOutput(sess *session.Session, sessionID string, data []byte, remainder string) (string, bool) {
@@ -1542,6 +1588,69 @@ func (a *App) consumeOpencodeJSONOutput(sess *session.Session, sessionID string,
 	return nextRemainder, consumed
 }
 
+func (a *App) consumeClaudeCodeJSONOutput(sess *session.Session, sessionID string, data []byte, remainder string) (string, bool) {
+	buffer := remainder + string(data)
+	lines := strings.Split(buffer, "\n")
+	nextRemainder := ""
+	if len(lines) > 0 && !strings.HasSuffix(buffer, "\n") {
+		nextRemainder = lines[len(lines)-1]
+		lines = lines[:len(lines)-1]
+	}
+
+	consumed := false
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" || !strings.HasPrefix(line, "{") {
+			continue
+		}
+
+		var envelope claudeCodeStreamEnvelope
+		if err := json.Unmarshal([]byte(line), &envelope); err != nil {
+			continue
+		}
+		consumed = true
+
+		if nativeID := strings.TrimSpace(envelope.SessionID); nativeID != "" {
+			if sess.BindConversation(nativeID, model.ResumeStrategyNativeID) {
+				snapshot := sess.Snapshot()
+				_ = a.persistSessionSnapshot(snapshot, true)
+				a.upsertConversationBinding(snapshot, nativeID)
+				a.Hub.Publish(sessionID, event.ConversationBound(snapshot))
+			}
+		}
+
+		text := claudeCodeResultText(envelope)
+		if text == "" {
+			continue
+		}
+
+		if sess.SetLastOutputPreview(outputPreview(text)) {
+			snapshot := sess.Snapshot()
+			_ = a.persistSessionSnapshot(snapshot, false)
+		}
+
+		messageID := newID("msg")
+		a.Hub.Publish(sessionID, event.MessageStarted(sessionID, messageID, "assistant"))
+		a.Hub.Publish(sessionID, event.MessageDelta(sessionID, messageID, "assistant", text))
+		a.Hub.Publish(sessionID, event.MessageCompleted(sessionID, messageID, "assistant"))
+	}
+
+	return nextRemainder, consumed
+}
+
+func claudeCodeResultText(envelope claudeCodeStreamEnvelope) string {
+	if !strings.EqualFold(strings.TrimSpace(envelope.Type), "result") {
+		return ""
+	}
+	if text := strings.TrimSpace(envelope.Result); text != "" {
+		return text
+	}
+	if envelope.IsError {
+		return strings.TrimSpace(envelope.Error)
+	}
+	return ""
+}
+
 func codexAssistantText(envelope codexExecEnvelope) string {
 	switch strings.TrimSpace(envelope.Type) {
 	case "item.completed":
@@ -1566,7 +1675,8 @@ func isCodexAssistantItemType(itemType string) bool {
 }
 
 func sanitizeOutputText(data []byte) string {
-	text := ansiRegexp.ReplaceAllString(string(data), "")
+	text := oscRegexp.ReplaceAllString(string(data), "")
+	text = ansiRegexp.ReplaceAllString(text, "")
 	text = strings.ReplaceAll(text, "\r\n", "\n")
 	text = strings.ReplaceAll(text, "\r", "\n")
 	lines := strings.Split(text, "\n")
@@ -1585,9 +1695,63 @@ func sanitizeOutputText(data []byte) string {
 		if line == "" {
 			continue
 		}
+		if isRuntimeNoiseLine(line) {
+			continue
+		}
 		filtered = append(filtered, line)
 	}
 	return strings.Join(filtered, "\n")
+}
+
+func isRuntimeNoiseLine(line string) bool {
+	normalized := strings.TrimSpace(line)
+	if normalized == "" {
+		return true
+	}
+	lower := strings.ToLower(normalized)
+	if strings.HasPrefix(lower, "]0;") {
+		return true
+	}
+	if strings.Contains(lower, "reading prompt from stdin") {
+		return true
+	}
+	if isSpinnerOnlyLine(normalized) {
+		return true
+	}
+	if strings.Contains(lower, "claude code") && containsSpinnerRune(normalized) && len([]rune(normalized)) <= 80 {
+		return true
+	}
+	if lower == "claude code" {
+		return true
+	}
+	return false
+}
+
+func isSpinnerOnlyLine(line string) bool {
+	stripped := strings.Map(func(r rune) rune {
+		switch r {
+		case ' ', '\t', '.', '·', '*', '+', '-', '✢', '✣', '✤', '✥', '✦', '✧', '✩', '✪', '✫', '✬', '✭', '✮', '✯', '✰', '✱', '✲', '✳', '✴', '✵', '✶', '✷', '✸', '✹', '✺', '✻', '✼', '✽', '✾', '✿':
+			return -1
+		}
+		if r >= '⠁' && r <= '⣿' {
+			return -1
+		}
+		return r
+	}, line)
+	return strings.TrimSpace(stripped) == ""
+}
+
+func containsSpinnerRune(line string) bool {
+	for _, r := range line {
+		if r >= '⠁' && r <= '⣿' {
+			return true
+		}
+		switch r {
+		case '✢', '✣', '✤', '✥', '✦', '✧', '✩', '✪', '✫', '✬', '✭', '✮', '✯', '✰', '✱', '✲', '✳', '✴', '✵', '✶', '✷', '✸', '✹', '✺', '✻', '✼', '✽', '✾', '✿':
+			return true
+		}
+	}
+	return false
 }
 
 func outputPreview(text string) string {
