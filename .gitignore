@@ -8,6 +8,7 @@ output/
 dist/
 tmp/
 docker-data/
+docker-agent-home/
 agent-bin/
 /agenleash
 *.log

@@ -12,7 +12,7 @@ Required for non-local deployments:
 | `AGENLEASH_ADAPTER_DIR` | Adapter spec directory. |
 | `AGENLEASH_ALLOWED_WORKSPACE_ROOTS` | Comma, newline, or path-list separated trusted workspace roots. |
 
-History discovery:
+History discovery and local CLI state:
 
 | Variable | Description |
 | --- | --- |
@@ -22,6 +22,11 @@ History discovery:
 | `AGENLEASH_CLAUDE_HOME` | Claude Code history directory. |
 | `AGENLEASH_CODEX_HOME` | Codex history directory. |
 | `AGENLEASH_OPENCODE_HOME` | OpenCode history directory. |
+| `AGENLEASH_CURSOR_HOME` | Cursor CLI state directory for Docker/local adapter runtimes. |
+| `AGENLEASH_GEMINI_HOME` | Gemini CLI state directory for Docker/local adapter runtimes. |
+| `AGENLEASH_GROK_HOME` | Grok CLI state directory for Docker/local adapter runtimes. |
+| `AGENLEASH_PI_HOME` | Pi CLI state directory for Docker/local adapter runtimes. |
+| `AGENLEASH_ACPX_HOME` | ACPX state directory for Docker/local adapter runtimes. |
 
 Optional:
 
@@ -77,6 +82,15 @@ AGENLEASH_PORT=8081
 AGENLEASH_CLAUDE_HOST_DIR=/absolute/path/to/.claude
 AGENLEASH_CODEX_HOST_DIR=/absolute/path/to/.codex
 AGENLEASH_OPENCODE_HOST_DIR=/absolute/path/to/opencode
+AGENLEASH_CURSOR_HOST_DIR=/absolute/path/to/.cursor
+AGENLEASH_GEMINI_HOST_DIR=/absolute/path/to/.gemini
+AGENLEASH_GROK_HOST_DIR=/absolute/path/to/.grok
+AGENLEASH_PI_HOST_DIR=/absolute/path/to/.pi
+AGENLEASH_ACPX_HOST_DIR=/absolute/path/to/.acpx
+AGENLEASH_XDG_CONFIG_HOST_DIR=/absolute/path/to/.config
+AGENLEASH_XDG_CACHE_HOST_DIR=/absolute/path/to/.cache
+AGENLEASH_XDG_STATE_HOST_DIR=/absolute/path/to/.local/state
+AGENLEASH_LOCAL_BIN_HOST_DIR=/absolute/path/to/.local/bin
 AGENLEASH_WORKSPACE_HOST_DIR=/absolute/path/to/workspaces
 AGENLEASH_AGENT_BIN_HOST_DIR=/absolute/path/to/agent-bin
 ```
@@ -85,9 +99,16 @@ The Compose stack maps host directories into stable container paths:
 
 | Host purpose | Container path |
 | --- | --- |
-| Claude Code history | `/data/agents/.claude` |
-| Codex history | `/data/agents/.codex` |
-| OpenCode history | `/data/agents/opencode` |
+| Claude Code state | `/home/agenleash/.claude` |
+| Codex state | `/home/agenleash/.codex` |
+| OpenCode state | `/home/agenleash/.local/share/opencode` |
+| Cursor state | `/home/agenleash/.cursor` |
+| Gemini state | `/home/agenleash/.gemini` |
+| Grok state | `/home/agenleash/.grok` |
+| Pi state | `/home/agenleash/.pi` |
+| ACPX state | `/home/agenleash/.acpx` |
+| XDG config/cache/state | `/home/agenleash/.config`, `/home/agenleash/.cache`, `/home/agenleash/.local/state` |
+| User-local binaries | `/home/agenleash/.local/bin` |
 | Workspaces | `/workspaces` |
 | Optional agent binaries | `/opt/agent-bin` |
 | AgenLeash data | `/var/lib/agenleash` |

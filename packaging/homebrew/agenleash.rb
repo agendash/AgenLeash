@@ -35,6 +35,7 @@ class Agenleash < Formula
       # AGENLEASH_ENABLE_WEB=true
       # AGENLEASH_CLAUDE_HOME=/Users/you/.claude
       # AGENLEASH_CODEX_HOME=/Users/you/.codex
+      # AGENLEASH_OPENCODE_HOME=/Users/you/Library/Application Support/opencode
       # AGENLEASH_ALLOWED_WORKSPACE_ROOTS=/Users/you/Workspace
     EOS
 

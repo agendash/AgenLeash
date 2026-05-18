@@ -255,6 +255,7 @@ AGENLEASH_DATA_DIR=${DATA_DIR}
 # Point these to the host user's real agent data directories.
 # AGENLEASH_CLAUDE_HOME=/home/you/.claude
 # AGENLEASH_CODEX_HOME=/home/you/.codex
+# AGENLEASH_OPENCODE_HOME=/home/you/.local/share/opencode
 
 # Restrict managed sessions to trusted paths only.
 # AGENLEASH_ALLOWED_WORKSPACE_ROOTS=/srv/workspaces,/srv/repos

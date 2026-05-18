@@ -77,6 +77,8 @@ AGENLEASH_CODEX_HOME=/home/you/.codex
 AGENLEASH_OPENCODE_HOME=/home/you/.local/share/opencode
 ```
 
+Docker Compose also mounts local CLI state for Cursor, Gemini, Grok, Pi, and ACPX. Set the matching `AGENLEASH_*_HOST_DIR` values in `.env` before starting the container, and put CLI binaries in either `AGENLEASH_AGENT_BIN_HOST_DIR` or `AGENLEASH_LOCAL_BIN_HOST_DIR`.
+
 The service refuses to start without `AGENLEASH_TOKEN` unless `AGENLEASH_ALLOW_NO_TOKEN=true` is set explicitly. That opt-out is intended for local development only.
 
 ## HTTP And WebSocket API

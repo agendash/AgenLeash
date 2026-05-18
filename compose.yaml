@@ -7,27 +7,47 @@ services:
     restart: unless-stopped
     environment:
       HOME: /home/agenleash
-      CODEX_HOME: /data/agents/.codex
+      CODEX_HOME: /home/agenleash/.codex
       AGENLEASH_TOKEN: ${AGENLEASH_TOKEN}
       AGENLEASH_ADDR: 0.0.0.0:8081
       AGENLEASH_ENABLE_WEB: ${AGENLEASH_ENABLE_WEB:-}
       AGENLEASH_ADAPTER_DIR: /usr/local/share/agenleash/adapters
       AGENLEASH_DATA_DIR: /var/lib/agenleash
-      AGENLEASH_CLAUDE_HOME: /data/agents/.claude
-      AGENLEASH_CODEX_HOME: /data/agents/.codex
-      AGENLEASH_OPENCODE_HOME: /data/agents/opencode
+      AGENLEASH_CLAUDE_HOME: /home/agenleash/.claude
+      AGENLEASH_CODEX_HOME: /home/agenleash/.codex
+      AGENLEASH_OPENCODE_HOME: /home/agenleash/.local/share/opencode
+      AGENLEASH_CURSOR_HOME: /home/agenleash/.cursor
+      AGENLEASH_GEMINI_HOME: /home/agenleash/.gemini
+      AGENLEASH_GROK_HOME: /home/agenleash/.grok
+      AGENLEASH_PI_HOME: /home/agenleash/.pi
+      AGENLEASH_ACPX_HOME: /home/agenleash/.acpx
       AGENLEASH_ALLOWED_WORKSPACE_ROOTS: /workspaces
       XDG_CACHE_HOME: /home/agenleash/.cache
       XDG_CONFIG_HOME: /home/agenleash/.config
       XDG_DATA_HOME: /home/agenleash/.local/share
       XDG_STATE_HOME: /home/agenleash/.local/state
-      PATH: /opt/agent-bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+      CURSOR_API_KEY: ${CURSOR_API_KEY:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
+      XAI_API_KEY: ${XAI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      PATH: /home/agenleash/.cursor/bin:/home/agenleash/.local/bin:/opt/agent-bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
     ports:
       - "${AGENLEASH_PORT:-8081}:8081"
     volumes:
       - ./docker-data:/var/lib/agenleash
-      - ${AGENLEASH_CLAUDE_HOST_DIR}:/data/agents/.claude:ro
-      - ${AGENLEASH_CODEX_HOST_DIR}:/data/agents/.codex:ro
-      - ${AGENLEASH_OPENCODE_HOST_DIR}:/data/agents/opencode:ro
+      - ${AGENLEASH_CLAUDE_HOST_DIR}:/home/agenleash/.claude
+      - ${AGENLEASH_CODEX_HOST_DIR}:/home/agenleash/.codex
+      - ${AGENLEASH_OPENCODE_HOST_DIR}:/home/agenleash/.local/share/opencode
+      - ${AGENLEASH_CURSOR_HOST_DIR:-./docker-agent-home/.cursor}:/home/agenleash/.cursor
+      - ${AGENLEASH_GEMINI_HOST_DIR:-./docker-agent-home/.gemini}:/home/agenleash/.gemini
+      - ${AGENLEASH_GROK_HOST_DIR:-./docker-agent-home/.grok}:/home/agenleash/.grok
+      - ${AGENLEASH_PI_HOST_DIR:-./docker-agent-home/.pi}:/home/agenleash/.pi
+      - ${AGENLEASH_ACPX_HOST_DIR:-./docker-agent-home/.acpx}:/home/agenleash/.acpx
+      - ${AGENLEASH_XDG_CONFIG_HOST_DIR:-./docker-agent-home/.config}:/home/agenleash/.config
+      - ${AGENLEASH_XDG_CACHE_HOST_DIR:-./docker-agent-home/.cache}:/home/agenleash/.cache
+      - ${AGENLEASH_XDG_STATE_HOST_DIR:-./docker-agent-home/.local/state}:/home/agenleash/.local/state
+      - ${AGENLEASH_LOCAL_BIN_HOST_DIR:-./agent-bin}:/home/agenleash/.local/bin:ro
       - ${AGENLEASH_WORKSPACE_HOST_DIR}:/workspaces
       - ${AGENLEASH_AGENT_BIN_HOST_DIR:-./agent-bin}:/opt/agent-bin:ro

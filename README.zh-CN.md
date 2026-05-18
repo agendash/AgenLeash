@@ -35,6 +35,11 @@ AGENLEASH_PORT=28081
 AGENLEASH_CLAUDE_HOME=/home/you/.claude
 AGENLEASH_CODEX_HOME=/home/you/.codex
 AGENLEASH_OPENCODE_HOME=/home/you/.local/share/opencode
+AGENLEASH_CURSOR_HOME=/home/you/.cursor
+AGENLEASH_GEMINI_HOME=/home/you/.gemini
+AGENLEASH_GROK_HOME=/home/you/.grok
+AGENLEASH_PI_HOME=/home/you/.pi
+AGENLEASH_ACPX_HOME=/home/you/.acpx
 AGENLEASH_ALLOWED_WORKSPACE_ROOTS=/srv/workspaces,/srv/repos
 ```
 
@@ -55,12 +60,22 @@ docker compose up -d --build
 
 - `AGENLEASH_CLAUDE_HOST_DIR`
 - `AGENLEASH_CODEX_HOST_DIR`
+- `AGENLEASH_OPENCODE_HOST_DIR`
+- `AGENLEASH_CURSOR_HOST_DIR`
+- `AGENLEASH_GEMINI_HOST_DIR`
+- `AGENLEASH_GROK_HOST_DIR`
+- `AGENLEASH_PI_HOST_DIR`
+- `AGENLEASH_ACPX_HOST_DIR`
+- `AGENLEASH_XDG_CONFIG_HOST_DIR`
+- `AGENLEASH_XDG_CACHE_HOST_DIR`
+- `AGENLEASH_XDG_STATE_HOST_DIR`
+- `AGENLEASH_LOCAL_BIN_HOST_DIR`
 - `AGENLEASH_WORKSPACE_HOST_DIR`
 - `AGENLEASH_AGENT_BIN_HOST_DIR`
 
 如果宿主机的 `8081` 已经被 AgenDash 或其他服务占用，请把 `AGENLEASH_PORT` 改成别的值，例如 `28081`。
 
-如果你希望容器内也能启动托管的 code agent，需要把 `claude` / `codex` 可执行文件放进 `AGENLEASH_AGENT_BIN_HOST_DIR`，或基于本仓库 Dockerfile 再做一层派生镜像。
+如果你希望容器内也能启动托管的 code agent，需要把 `claude` / `codex` / `opencode` / `agent` / `gemini` / `grok` / `pi` / `acpx` 这类可执行文件放进 `AGENLEASH_AGENT_BIN_HOST_DIR` 或 `AGENLEASH_LOCAL_BIN_HOST_DIR`，也可以基于本仓库 Dockerfile 再做一层派生镜像。
 
 如果你是手动编辑 `.env`，最简单的做法是先执行一次 `uuidgen`，再把结果填到 `AGENLEASH_TOKEN=`。
 
@@ -124,6 +139,11 @@ GET /api/v1/stats?top=20
   - Claude: `AGENLEASH_CLAUDE_HOME`
   - Codex: `AGENLEASH_CODEX_HOME`
   - OpenCode: `AGENLEASH_OPENCODE_HOME`
+  - Cursor: `AGENLEASH_CURSOR_HOME`
+  - Gemini: `AGENLEASH_GEMINI_HOME`
+  - Grok: `AGENLEASH_GROK_HOME`
+  - Pi: `AGENLEASH_PI_HOME`
+  - ACPX: `AGENLEASH_ACPX_HOME`
 - 允许运行的工作区根目录
   - `AGENLEASH_ALLOWED_WORKSPACE_ROOTS`
 - AgenLeash 自身数据目录
@@ -133,9 +153,18 @@ GET /api/v1/stats?top=20
 
 | 用途 | 宿主机路径示例 | 容器内路径示例 |
 | --- | --- | --- |
-| Claude 历史 | `/home/you/.claude` | `/data/agents/.claude` |
-| Codex 历史 | `/home/you/.codex` | `/data/agents/.codex` |
-| OpenCode 历史 | `/home/you/.local/share/opencode` | `/data/agents/opencode` |
+| Claude 历史与登录态 | `/home/you/.claude` | `/home/agenleash/.claude` |
+| Codex 历史与登录态 | `/home/you/.codex` | `/home/agenleash/.codex` |
+| OpenCode 数据 | `/home/you/.local/share/opencode` | `/home/agenleash/.local/share/opencode` |
+| Cursor 数据 | `/home/you/.cursor` | `/home/agenleash/.cursor` |
+| Gemini 数据 | `/home/you/.gemini` | `/home/agenleash/.gemini` |
+| Grok 数据 | `/home/you/.grok` | `/home/agenleash/.grok` |
+| Pi 数据 | `/home/you/.pi` | `/home/agenleash/.pi` |
+| ACPX 数据 | `/home/you/.acpx` | `/home/agenleash/.acpx` |
+| XDG 配置 | `/home/you/.config` | `/home/agenleash/.config` |
+| XDG 缓存 | `/home/you/.cache` | `/home/agenleash/.cache` |
+| XDG 状态 | `/home/you/.local/state` | `/home/agenleash/.local/state` |
+| 用户级 CLI | `/home/you/.local/bin` | `/home/agenleash/.local/bin` |
 | 代码工作区 | `/home/you/Workspace` | `/workspaces` |
 | Agent 可执行文件 | `/opt/agent-bin` | `/opt/agent-bin` |
 | AgenLeash 数据 | `/var/lib/agenleash` | `/var/lib/agenleash` |

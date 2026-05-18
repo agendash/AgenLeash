@@ -14,6 +14,11 @@
 | `AGENLEASH_CLAUDE_HOME` | Claude 历史目录 |
 | `AGENLEASH_CODEX_HOME` | Codex 历史目录 |
 | `AGENLEASH_OPENCODE_HOME` | OpenCode 历史目录 |
+| `AGENLEASH_CURSOR_HOME` | Docker / 本地 adapter 运行 Cursor CLI 时使用的状态目录 |
+| `AGENLEASH_GEMINI_HOME` | Docker / 本地 adapter 运行 Gemini CLI 时使用的状态目录 |
+| `AGENLEASH_GROK_HOME` | Docker / 本地 adapter 运行 Grok CLI 时使用的状态目录 |
+| `AGENLEASH_PI_HOME` | Docker / 本地 adapter 运行 Pi CLI 时使用的状态目录 |
+| `AGENLEASH_ACPX_HOME` | Docker / 本地 adapter 运行 ACPX 时使用的状态目录 |
 | `AGENLEASH_ALLOWED_WORKSPACE_ROOTS` | 允许托管 agent 启动的工作区根目录列表 |
 
 补充说明：
@@ -73,8 +78,18 @@ AGENLEASH_ENV_FILE=.env ./tmp/bin/agenleash
 
 | 宿主机 | 容器内 |
 | --- | --- |
-| `~/.claude` | `/data/agents/.claude` |
-| `~/.codex` | `/data/agents/.codex` |
+| `~/.claude` | `/home/agenleash/.claude` |
+| `~/.codex` | `/home/agenleash/.codex` |
+| `~/.local/share/opencode` | `/home/agenleash/.local/share/opencode` |
+| `~/.cursor` | `/home/agenleash/.cursor` |
+| `~/.gemini` | `/home/agenleash/.gemini` |
+| `~/.grok` | `/home/agenleash/.grok` |
+| `~/.pi` | `/home/agenleash/.pi` |
+| `~/.acpx` | `/home/agenleash/.acpx` |
+| `~/.config` | `/home/agenleash/.config` |
+| `~/.cache` | `/home/agenleash/.cache` |
+| `~/.local/state` | `/home/agenleash/.local/state` |
+| `~/.local/bin` | `/home/agenleash/.local/bin` |
 | `~/Workspace` | `/workspaces` |
 | `./agent-bin` | `/opt/agent-bin` |
 | `./docker-data` | `/var/lib/agenleash` |
@@ -94,6 +109,16 @@ AGENLEASH_PORT=28081
 # AGENLEASH_ENABLE_WEB=true
 AGENLEASH_CLAUDE_HOST_DIR=/absolute/path/to/.claude
 AGENLEASH_CODEX_HOST_DIR=/absolute/path/to/.codex
+AGENLEASH_OPENCODE_HOST_DIR=/absolute/path/to/opencode
+AGENLEASH_CURSOR_HOST_DIR=/absolute/path/to/.cursor
+AGENLEASH_GEMINI_HOST_DIR=/absolute/path/to/.gemini
+AGENLEASH_GROK_HOST_DIR=/absolute/path/to/.grok
+AGENLEASH_PI_HOST_DIR=/absolute/path/to/.pi
+AGENLEASH_ACPX_HOST_DIR=/absolute/path/to/.acpx
+AGENLEASH_XDG_CONFIG_HOST_DIR=/absolute/path/to/.config
+AGENLEASH_XDG_CACHE_HOST_DIR=/absolute/path/to/.cache
+AGENLEASH_XDG_STATE_HOST_DIR=/absolute/path/to/.local/state
+AGENLEASH_LOCAL_BIN_HOST_DIR=/absolute/path/to/.local/bin
 AGENLEASH_WORKSPACE_HOST_DIR=/absolute/path/to/Workspace
 AGENLEASH_AGENT_BIN_HOST_DIR=/absolute/path/to/agent-bin
 ```
@@ -104,11 +129,11 @@ AGENLEASH_AGENT_BIN_HOST_DIR=/absolute/path/to/agent-bin
 
 ### 3.3 托管 agent 的额外要求
 
-只挂载 `.claude` / `.codex` 时，AgenLeash 可以发现历史会话。
+只挂载 `.claude` / `.codex` / OpenCode 数据目录时，AgenLeash 可以发现已有历史会话。
 
-如果还要在容器里直接启动托管的 `claude` / `codex`，需要额外满足之一：
+如果还要在容器里直接启动托管的 `claude` / `codex` / `opencode` / `agent` / `gemini` / `grok` / `pi` / `acpx`，需要额外满足之一：
 
-1. 把 agent 二进制挂载到 `/opt/agent-bin`
+1. 把 agent 二进制挂载到 `/opt/agent-bin` 或 `/home/agenleash/.local/bin`
 2. 基于 `Dockerfile` 构建派生镜像，在镜像里安装对应 CLI
 
 ## 4. systemd 开机自启
