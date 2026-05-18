@@ -49,7 +49,9 @@ func TestLoadDirectoryAndResolve(t *testing.T) {
 		codex      AdapterSpec
 		opencode   AdapterSpec
 	)
+	loadedNames := map[string]bool{}
 	for _, spec := range specs {
+		loadedNames[spec.Metadata.Name] = true
 		if spec.Metadata.Name == "claudecode" {
 			claudecode = spec
 		}
@@ -68,6 +70,20 @@ func TestLoadDirectoryAndResolve(t *testing.T) {
 	}
 	if opencode.Metadata.Name == "" {
 		t.Fatalf("opencode spec not loaded")
+	}
+	for _, name := range []string{
+		"codex_local",
+		"claude_local",
+		"opencode_local",
+		"cursor",
+		"gemini_local",
+		"grok_local",
+		"pi_local",
+		"acpx_local",
+	} {
+		if !loadedNames[name] {
+			t.Fatalf("%s spec not loaded", name)
+		}
 	}
 
 	effective, err := Resolve(claudecode, "1.12.0")

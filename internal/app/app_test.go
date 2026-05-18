@@ -31,12 +31,13 @@ func TestBuildRuntimeArgsForClaudeCode(t *testing.T) {
 		t.Fatalf("Resolve() error = %v", err)
 	}
 
-	args := buildRuntimeArgs(spec, effective, model.StartModeResume, "conv_123", []string{"--debug"})
+	args := buildRuntimeArgs(spec, effective, model.StartModeResume, "conv_123", "/tmp/work", []string{"--debug"})
 	want := []string{
-		"-p",
-		"--verbose",
+		"--print",
+		"-",
 		"--output-format",
 		"stream-json",
+		"--verbose",
 		"--dangerously-skip-permissions",
 		"--resume",
 		"conv_123",
@@ -60,7 +61,7 @@ func TestBuildRuntimeArgsForOpencode(t *testing.T) {
 		t.Fatalf("Resolve() error = %v", err)
 	}
 
-	args := buildRuntimeArgs(spec, effective, model.StartModeResume, "ses_123", nil)
+	args := buildRuntimeArgs(spec, effective, model.StartModeResume, "ses_123", "/tmp/work", nil)
 	want := []string{"run", "--session", "ses_123", "--format", "json"}
 	if len(args) != len(want) {
 		t.Fatalf("args length = %d, want %d (%v)", len(args), len(want), args)
@@ -80,7 +81,7 @@ func TestBuildRuntimeArgsForCodexResume(t *testing.T) {
 		t.Fatalf("Resolve() error = %v", err)
 	}
 
-	args := buildRuntimeArgs(spec, effective, model.StartModeResume, "thread_123", nil)
+	args := buildRuntimeArgs(spec, effective, model.StartModeResume, "thread_123", "/tmp/work", nil)
 	want := []string{"exec", "resume", "--json", "--skip-git-repo-check", "--dangerously-bypass-approvals-and-sandbox", "thread_123"}
 	if len(args) != len(want) {
 		t.Fatalf("args length = %d, want %d (%v)", len(args), len(want), args)
@@ -90,6 +91,70 @@ func TestBuildRuntimeArgsForCodexResume(t *testing.T) {
 			t.Fatalf("args[%d] = %q, want %q (args=%v)", i, args[i], want[i], args)
 		}
 	}
+}
+
+func TestBuildRuntimeArgsForPaperclipLocalAdapters(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	cursorSpec := loadNamedAdapterSpec(t, "cursor")
+	cursorEffective, err := adapter.Resolve(cursorSpec, "0.1.0")
+	if err != nil {
+		t.Fatalf("Resolve(cursor) error = %v", err)
+	}
+	cursorArgs := buildRuntimeArgs(cursorSpec, cursorEffective, model.StartModeResume, "cursor_session", "/workspace/app", nil)
+	assertArgsContainInOrder(t, cursorArgs, []string{"--workspace", "/workspace/app"})
+	assertArgsContainInOrder(t, cursorArgs, []string{"--resume", "cursor_session"})
+
+	geminiSpec := loadNamedAdapterSpec(t, "gemini_local")
+	geminiEffective, err := adapter.Resolve(geminiSpec, "0.1.0")
+	if err != nil {
+		t.Fatalf("Resolve(gemini) error = %v", err)
+	}
+	geminiArgs := buildRuntimeArgs(geminiSpec, geminiEffective, model.StartModeResume, "gemini_session", "/workspace/app", nil)
+	assertArgsContainInOrder(t, geminiArgs, []string{"--resume", "gemini_session"})
+	assertArgsContainInOrder(t, geminiArgs, []string{"--prompt", "{prompt}"})
+
+	grokSpec := loadNamedAdapterSpec(t, "grok_local")
+	grokEffective, err := adapter.Resolve(grokSpec, "0.1.0")
+	if err != nil {
+		t.Fatalf("Resolve(grok) error = %v", err)
+	}
+	grokArgs := buildRuntimeArgs(grokSpec, grokEffective, model.StartModeResume, "grok_session", "/workspace/app", nil)
+	assertArgsContainInOrder(t, grokArgs, []string{"--cwd", "/workspace/app"})
+	assertArgsContainInOrder(t, grokArgs, []string{"--resume", "grok_session"})
+	assertArgsContainInOrder(t, grokArgs, []string{"--single", "{prompt}"})
+
+	piSpec := loadNamedAdapterSpec(t, "pi_local")
+	piEffective, err := adapter.Resolve(piSpec, "0.1.0")
+	if err != nil {
+		t.Fatalf("Resolve(pi) error = %v", err)
+	}
+	piArgs := buildRuntimeArgs(piSpec, piEffective, model.StartModeNew, "conv/pi:test", "/workspace/app", nil)
+	assertArgsContainInOrder(t, piArgs, []string{"--session"})
+	if strings.Contains(strings.Join(piArgs, "\x00"), "{session}") {
+		t.Fatalf("pi args still contain session placeholder: %v", piArgs)
+	}
+	assertArgsContainInOrder(t, piArgs, []string{"{prompt}"})
+}
+
+func assertArgsContainInOrder(t *testing.T, args, want []string) {
+	t.Helper()
+	if len(want) == 0 {
+		return
+	}
+	for i := 0; i <= len(args)-len(want); i++ {
+		matched := true
+		for j := range want {
+			if args[i+j] != want[j] {
+				matched = false
+				break
+			}
+		}
+		if matched {
+			return
+		}
+	}
+	t.Fatalf("args %v do not contain sequence %v", args, want)
 }
 
 func TestNewRequiresTokenUnlessExplicitlyDisabled(t *testing.T) {
@@ -157,7 +222,7 @@ func TestBuildRuntimeArgsStripsBaselineResumeFlags(t *testing.T) {
 	}
 	effective.Runtime.Args = []string{"--resume", "old", "--verbose"}
 
-	args := buildRuntimeArgs(spec, effective, model.StartModeNew, "", nil)
+	args := buildRuntimeArgs(spec, effective, model.StartModeNew, "", "/tmp/work", nil)
 	want := []string{"--verbose"}
 	if len(args) != len(want) || args[0] != want[0] {
 		t.Fatalf("args = %v, want %v", args, want)
@@ -197,12 +262,18 @@ func loadCodexAdapterSpec(t *testing.T) adapter.AdapterSpec {
 func loadOpencodeAdapterSpec(t *testing.T) adapter.AdapterSpec {
 	t.Helper()
 
+	return loadNamedAdapterSpec(t, "opencode")
+}
+
+func loadNamedAdapterSpec(t *testing.T, name string) adapter.AdapterSpec {
+	t.Helper()
+
 	_, file, _, ok := runtime.Caller(0)
 	if !ok {
 		t.Fatal("runtime.Caller failed")
 	}
 	root := filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
-	spec, err := adapter.LoadFile(filepath.Join(root, "adapters", "opencode.json"))
+	spec, err := adapter.LoadFile(filepath.Join(root, "adapters", name+".json"))
 	if err != nil {
 		t.Fatalf("LoadFile() error = %v", err)
 	}

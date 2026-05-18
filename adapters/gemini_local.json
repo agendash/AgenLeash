@@ -1,0 +1,76 @@
+{
+  "apiVersion": "agenleash/v1alpha1",
+  "kind": "AdapterSpec",
+  "metadata": {
+    "name": "gemini_local",
+    "displayName": "Gemini CLI (local)",
+    "schemaVersion": 1,
+    "adapterRevision": 1
+  },
+  "spec": {
+    "agentFamily": "gemini",
+    "detection": {
+      "binaryNames": ["gemini"],
+      "versionStrategy": {
+        "type": "command",
+        "command": ["gemini", "--version"],
+        "regex": "(?P<version>\\d+\\.\\d+\\.\\d+)",
+        "source": "stdout"
+      },
+      "fallbackProfile": "stable"
+    },
+    "runtime": {
+      "mode": "stdio_prompt_arg",
+      "entrypoint": "gemini",
+      "args": [
+        "--output-format",
+        "stream-json",
+        "--approval-mode",
+        "yolo",
+        "--sandbox=none",
+        "--prompt",
+        "{prompt}"
+      ],
+      "env": {}
+    },
+    "cwdPolicy": {
+      "mode": "required",
+      "requireGitRoot": false,
+      "resolveSymlink": true
+    },
+    "capabilities": {
+      "requiresTTY": false,
+      "supportsResume": true,
+      "supportsInterrupt": true,
+      "supportsNativeConversationId": true
+    },
+    "features": {
+      "jsonEventStream": true,
+      "streamingText": true,
+      "toolCallEvents": false,
+      "structuredPatch": false,
+      "planMode": false
+    },
+    "conversation": {
+      "mode": "native_id"
+    },
+    "workspace": {
+      "mode": "cwd_plus_git"
+    },
+    "eventParser": {
+      "type": "jsonl_events",
+      "profile": "gemini_stream_json"
+    },
+    "versionProfiles": [
+      {
+        "name": "stable",
+        "match": ">=0.0.0",
+        "overrides": {
+          "features": {
+            "streamingText": true
+          }
+        }
+      }
+    ]
+  }
+}

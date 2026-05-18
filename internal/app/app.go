@@ -862,7 +862,7 @@ func (a *App) handleStartSession(req *http.Request, in httpapi.StartSessionReque
 	runtimeSpec := runtime.Spec{
 		Mode:    strings.TrimSpace(stringValue(effective.Runtime.Mode)),
 		Command: entrypoint,
-		Args:    buildRuntimeArgs(spec, effective, startMode, conversationID, in.Args),
+		Args:    buildRuntimeArgs(spec, effective, startMode, conversationID, cwd, in.Args),
 		Dir:     cwd,
 		Env: mergeEnv(os.Environ(), effective.Runtime.Env, map[string]string{
 			"AGENLEASH_SESSION_ID":      sessionID,
@@ -948,6 +948,7 @@ func (a *App) pumpSession(sess *session.Session, spec adapter.EffectiveSpec) {
 	codexJSONRemainder := ""
 	opencodeJSONRemainder := ""
 	claudeCodeJSONRemainder := ""
+	paperclipLocalJSONState := paperclipLocalStreamState{}
 
 	for evt := range sess.Events() {
 		snapshot := sess.Snapshot()
@@ -995,6 +996,21 @@ func (a *App) pumpSession(sess *session.Session, spec adapter.EffectiveSpec) {
 					sessionID,
 					evt.Data,
 					claudeCodeJSONRemainder,
+				)
+				snapshot = sess.Snapshot()
+				_ = a.persistSessionSnapshot(snapshot, false)
+				if consumed {
+					continue
+				}
+			}
+			if isPaperclipLocalJSON(spec) {
+				var consumed bool
+				paperclipLocalJSONState, consumed = a.consumePaperclipLocalJSONOutput(
+					sess,
+					sessionID,
+					evt.Data,
+					paperclipLocalJSONState,
+					spec,
 				)
 				snapshot = sess.Snapshot()
 				_ = a.persistSessionSnapshot(snapshot, false)
@@ -1080,6 +1096,20 @@ func (a *App) pumpSession(sess *session.Session, spec adapter.EffectiveSpec) {
 					claudeCodeJSONRemainder,
 				)
 				snapshot = sess.Snapshot()
+			}
+			if isPaperclipLocalJSON(spec) && strings.TrimSpace(paperclipLocalJSONState.Remainder) != "" {
+				paperclipLocalJSONState, _ = a.consumePaperclipLocalJSONOutput(
+					sess,
+					sessionID,
+					[]byte("\n"),
+					paperclipLocalJSONState,
+					spec,
+				)
+				snapshot = sess.Snapshot()
+			}
+			if paperclipLocalJSONState.MessageID != "" {
+				a.Hub.Publish(sessionID, event.MessageCompleted(sessionID, paperclipLocalJSONState.MessageID, "assistant"))
+				paperclipLocalJSONState.MessageID = ""
 			}
 			_ = a.persistSessionSnapshot(snapshot, true)
 			if messageID != "" {
@@ -1311,9 +1341,13 @@ func resolveCommandBinary(preferred string, candidates []string) string {
 	return strings.TrimSpace(preferred)
 }
 
-func buildRuntimeArgs(spec adapter.AdapterSpec, effective adapter.EffectiveSpec, startMode model.StartMode, conversationID string, inputArgs []string) []string {
-	baseArgs := append([]string(nil), effective.Runtime.Args...)
-	switch spec.Spec.AgentFamily {
+func buildRuntimeArgs(spec adapter.AdapterSpec, effective adapter.EffectiveSpec, startMode model.StartMode, conversationID, cwd string, inputArgs []string) []string {
+	baseArgs := replaceRuntimeArgPlaceholders(effective.Runtime.Args, runtimeArgContext{
+		ConversationID: conversationID,
+		CWD:            cwd,
+		AgentFamily:    firstNonEmpty(effective.AgentFamily, spec.Spec.AgentFamily),
+	})
+	switch strings.TrimSpace(firstNonEmpty(effective.AgentFamily, spec.Spec.AgentFamily)) {
 	case "claudecode":
 		baseArgs = stripClaudeResumeArgs(baseArgs)
 		if startMode == model.StartModeResume && strings.TrimSpace(conversationID) != "" {
@@ -1323,8 +1357,91 @@ func buildRuntimeArgs(spec adapter.AdapterSpec, effective adapter.EffectiveSpec,
 		baseArgs = buildCodexRuntimeArgs(baseArgs, startMode, conversationID)
 	case "opencode":
 		baseArgs = buildOpencodeRuntimeArgs(baseArgs, startMode, conversationID)
+	case "cursor", "gemini", "grok":
+		baseArgs = appendResumePair(baseArgs, startMode, conversationID, "--resume")
 	}
 	return mergeArgs(baseArgs, inputArgs)
+}
+
+type runtimeArgContext struct {
+	ConversationID string
+	CWD            string
+	AgentFamily    string
+}
+
+func replaceRuntimeArgPlaceholders(args []string, ctx runtimeArgContext) []string {
+	out := make([]string, 0, len(args))
+	for _, arg := range args {
+		next := strings.ReplaceAll(arg, "{cwd}", ctx.CWD)
+		next = strings.ReplaceAll(next, "{AGENLEASH_CWD}", ctx.CWD)
+		next = strings.ReplaceAll(next, "{conversation_id}", strings.TrimSpace(ctx.ConversationID))
+		next = strings.ReplaceAll(next, "{AGENLEASH_CONVERSATION_ID}", strings.TrimSpace(ctx.ConversationID))
+		if strings.Contains(next, "{session}") || strings.Contains(next, "{AGENLEASH_SESSION_FILE}") {
+			sessionPath := promptArgSessionPath(ctx)
+			next = strings.ReplaceAll(next, "{session}", sessionPath)
+			next = strings.ReplaceAll(next, "{AGENLEASH_SESSION_FILE}", sessionPath)
+		}
+		out = append(out, next)
+	}
+	return out
+}
+
+func promptArgSessionPath(ctx runtimeArgContext) string {
+	home, err := os.UserHomeDir()
+	if err != nil || strings.TrimSpace(home) == "" {
+		home = os.TempDir()
+	}
+	sessionName := sanitizeRuntimeSessionName(firstNonEmpty(ctx.ConversationID, "default"))
+	dir := filepath.Join(home, ".agenleash", "sessions", sanitizeRuntimeSessionName(firstNonEmpty(ctx.AgentFamily, "agent")))
+	_ = os.MkdirAll(dir, 0o755)
+	return filepath.Join(dir, sessionName+".jsonl")
+}
+
+func sanitizeRuntimeSessionName(value string) string {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return "default"
+	}
+	var b strings.Builder
+	for _, r := range trimmed {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_' || r == '.' {
+			b.WriteRune(r)
+			continue
+		}
+		b.WriteByte('_')
+	}
+	out := strings.Trim(b.String(), "._-")
+	if out == "" {
+		return "default"
+	}
+	if len(out) > 96 {
+		return out[:96]
+	}
+	return out
+}
+
+func appendResumePair(baseArgs []string, startMode model.StartMode, conversationID, flag string) []string {
+	trimmedID := strings.TrimSpace(conversationID)
+	if startMode != model.StartModeResume || trimmedID == "" {
+		return baseArgs
+	}
+	out := make([]string, 0, len(baseArgs)+2)
+	inserted := false
+	for i := 0; i < len(baseArgs); i++ {
+		if !inserted && ((i+1 < len(baseArgs) && isPromptPlaceholderArg(baseArgs[i+1])) || isPromptPlaceholderArg(baseArgs[i])) {
+			out = append(out, flag, trimmedID)
+			inserted = true
+		}
+		out = append(out, baseArgs[i])
+	}
+	if !inserted {
+		out = append(out, flag, trimmedID)
+	}
+	return out
+}
+
+func isPromptPlaceholderArg(arg string) bool {
+	return strings.Contains(arg, "{prompt}") || strings.Contains(arg, "{AGENLEASH_PROMPT}")
 }
 
 func buildCodexRuntimeArgs(baseArgs []string, startMode model.StartMode, conversationID string) []string {
@@ -1421,33 +1538,62 @@ func (a *App) shouldCloseInputAfterMessage(sessionID string) bool {
 	snapshot := sess.Snapshot()
 	adapterName := strings.ToLower(strings.TrimSpace(snapshot.Adapter))
 	knownStdioAdapter := adapterName == "codex" ||
+		adapterName == "codex_local" ||
 		adapterName == "opencode" ||
-		adapterName == "claudecode"
+		adapterName == "opencode_local" ||
+		adapterName == "claudecode" ||
+		adapterName == "claude_local" ||
+		adapterName == "cursor" ||
+		adapterName == "cursor_local" ||
+		adapterName == "gemini_local" ||
+		adapterName == "grok_local" ||
+		adapterName == "pi_local" ||
+		adapterName == "acpx_local"
 	return knownStdioAdapter &&
-		strings.EqualFold(strings.TrimSpace(snapshot.RuntimeMode), "stdio")
+		(strings.EqualFold(strings.TrimSpace(snapshot.RuntimeMode), "stdio") ||
+			strings.EqualFold(strings.TrimSpace(snapshot.RuntimeMode), runtime.PromptArgMode))
 }
 
 func isCodexExecJSON(spec adapter.EffectiveSpec) bool {
-	return strings.EqualFold(strings.TrimSpace(spec.AdapterName), "codex") &&
+	return strings.EqualFold(adapterFamily(spec), "codex") &&
 		strings.EqualFold(strings.TrimSpace(stringValue(spec.EventParser.Type)), "jsonl_events") &&
 		strings.EqualFold(strings.TrimSpace(stringValue(spec.EventParser.Profile)), "codex_exec")
 }
 
 func isOpencodeRunJSON(spec adapter.EffectiveSpec) bool {
-	return strings.EqualFold(strings.TrimSpace(spec.AdapterName), "opencode") &&
+	return strings.EqualFold(adapterFamily(spec), "opencode") &&
 		strings.EqualFold(strings.TrimSpace(stringValue(spec.EventParser.Type)), "jsonl_events") &&
 		strings.EqualFold(strings.TrimSpace(stringValue(spec.EventParser.Profile)), "opencode_run")
 }
 
 func isClaudeCodeStreamJSON(spec adapter.EffectiveSpec) bool {
-	return strings.EqualFold(strings.TrimSpace(spec.AdapterName), "claudecode") &&
+	return strings.EqualFold(adapterFamily(spec), "claudecode") &&
 		strings.EqualFold(strings.TrimSpace(stringValue(spec.EventParser.Type)), "json_events") &&
 		(strings.EqualFold(strings.TrimSpace(stringValue(spec.EventParser.Profile)), "stable") ||
 			strings.EqualFold(strings.TrimSpace(stringValue(spec.EventParser.Profile)), "v2"))
 }
 
+func adapterFamily(spec adapter.EffectiveSpec) string {
+	return strings.ToLower(strings.TrimSpace(firstNonEmpty(spec.AgentFamily, spec.AdapterName)))
+}
+
+func isPaperclipLocalJSON(spec adapter.EffectiveSpec) bool {
+	profile := strings.ToLower(strings.TrimSpace(stringValue(spec.EventParser.Profile)))
+	switch profile {
+	case "cursor_stream_json",
+		"gemini_stream_json",
+		"grok_streaming_json",
+		"pi_json",
+		"acpx_json":
+		return strings.EqualFold(strings.TrimSpace(stringValue(spec.EventParser.Type)), "jsonl_events") ||
+			strings.EqualFold(strings.TrimSpace(stringValue(spec.EventParser.Type)), "json_events")
+	default:
+		return false
+	}
+}
+
 func suppressUnstructuredRuntimeOutput(spec adapter.EffectiveSpec) bool {
-	return isCodexExecJSON(spec) || isOpencodeRunJSON(spec) || isClaudeCodeStreamJSON(spec)
+	return isCodexExecJSON(spec) || isOpencodeRunJSON(spec) || isClaudeCodeStreamJSON(spec) || isPaperclipLocalJSON(spec)
 }
 
 type codexExecEnvelope struct {
@@ -1649,6 +1795,292 @@ func claudeCodeResultText(envelope claudeCodeStreamEnvelope) string {
 		return strings.TrimSpace(envelope.Error)
 	}
 	return ""
+}
+
+type paperclipLocalStreamState struct {
+	Remainder string
+	MessageID string
+	Streamed  bool
+}
+
+func (a *App) consumePaperclipLocalJSONOutput(sess *session.Session, sessionID string, data []byte, state paperclipLocalStreamState, spec adapter.EffectiveSpec) (paperclipLocalStreamState, bool) {
+	buffer := state.Remainder + string(data)
+	lines := strings.Split(buffer, "\n")
+	state.Remainder = ""
+	if len(lines) > 0 && !strings.HasSuffix(buffer, "\n") {
+		state.Remainder = lines[len(lines)-1]
+		lines = lines[:len(lines)-1]
+	}
+
+	consumed := false
+	for _, line := range lines {
+		line = normalizeCursorPrefixedLine(strings.TrimSpace(line))
+		if line == "" || !strings.HasPrefix(line, "{") {
+			continue
+		}
+
+		var payload map[string]any
+		if err := json.Unmarshal([]byte(line), &payload); err != nil {
+			continue
+		}
+		consumed = true
+
+		if nativeID := paperclipJSONSessionID(payload); nativeID != "" {
+			if sess.BindConversation(nativeID, model.ResumeStrategyNativeID) {
+				snapshot := sess.Snapshot()
+				_ = a.persistSessionSnapshot(snapshot, true)
+				a.upsertConversationBinding(snapshot, nativeID)
+				a.Hub.Publish(sessionID, event.ConversationBound(snapshot))
+			}
+		}
+
+		texts, streaming, terminal := paperclipJSONAssistantTexts(payload, strings.ToLower(strings.TrimSpace(stringValue(spec.EventParser.Profile))))
+		if len(texts) > 0 {
+			text := strings.TrimSpace(strings.Join(texts, "\n\n"))
+			if text != "" {
+				if streaming {
+					state = a.publishPaperclipJSONDelta(sess, sessionID, state, text)
+				} else if !state.Streamed {
+					a.publishPaperclipJSONMessage(sess, sessionID, text)
+				}
+			}
+		}
+
+		if terminal && state.MessageID != "" {
+			a.Hub.Publish(sessionID, event.MessageCompleted(sessionID, state.MessageID, "assistant"))
+			state.MessageID = ""
+			state.Streamed = false
+		}
+	}
+
+	return state, consumed
+}
+
+func (a *App) publishPaperclipJSONDelta(sess *session.Session, sessionID string, state paperclipLocalStreamState, text string) paperclipLocalStreamState {
+	if sess.SetLastOutputPreview(outputPreview(text)) {
+		snapshot := sess.Snapshot()
+		_ = a.persistSessionSnapshot(snapshot, false)
+	}
+	if state.MessageID == "" {
+		state.MessageID = newID("msg")
+		a.Hub.Publish(sessionID, event.MessageStarted(sessionID, state.MessageID, "assistant"))
+	}
+	a.Hub.Publish(sessionID, event.MessageDelta(sessionID, state.MessageID, "assistant", text))
+	state.Streamed = true
+	return state
+}
+
+func (a *App) publishPaperclipJSONMessage(sess *session.Session, sessionID string, text string) {
+	if sess.SetLastOutputPreview(outputPreview(text)) {
+		snapshot := sess.Snapshot()
+		_ = a.persistSessionSnapshot(snapshot, false)
+	}
+	messageID := newID("msg")
+	a.Hub.Publish(sessionID, event.MessageStarted(sessionID, messageID, "assistant"))
+	a.Hub.Publish(sessionID, event.MessageDelta(sessionID, messageID, "assistant", text))
+	a.Hub.Publish(sessionID, event.MessageCompleted(sessionID, messageID, "assistant"))
+}
+
+func normalizeCursorPrefixedLine(line string) string {
+	prefixed := regexp.MustCompile(`(?i)^(stdout|stderr)\s*[:=]?\s*([\[{].*)$`).FindStringSubmatch(line)
+	if len(prefixed) == 3 {
+		return strings.TrimSpace(prefixed[2])
+	}
+	return line
+}
+
+func paperclipJSONAssistantTexts(payload map[string]any, profile string) ([]string, bool, bool) {
+	eventType := strings.TrimSpace(jsonString(payload, "type"))
+	normalizedType := strings.ToLower(eventType)
+	switch profile {
+	case "grok_streaming_json":
+		return grokJSONAssistantTexts(payload, normalizedType)
+	case "pi_json":
+		return piJSONAssistantTexts(payload, normalizedType)
+	case "acpx_json":
+		return acpxJSONAssistantTexts(payload, normalizedType)
+	default:
+		return cursorGeminiJSONAssistantTexts(payload, normalizedType)
+	}
+}
+
+func cursorGeminiJSONAssistantTexts(payload map[string]any, eventType string) ([]string, bool, bool) {
+	switch eventType {
+	case "assistant":
+		return collectJSONText(payload["message"]), false, true
+	case "message":
+		if strings.EqualFold(strings.TrimSpace(jsonString(payload, "role")), "assistant") {
+			return collectJSONText(payload["content"]), false, true
+		}
+	case "text":
+		return collectJSONText(payload["part"]), true, false
+	case "result":
+		return collectFirstJSONText(payload, "result", "text", "response", "summary"), false, true
+	case "error":
+		return collectFirstJSONText(payload, "message", "error", "detail"), false, true
+	case "system":
+		if strings.EqualFold(strings.TrimSpace(jsonString(payload, "subtype")), "error") {
+			return collectFirstJSONText(payload, "message", "error", "detail"), false, true
+		}
+	}
+	return nil, false, false
+}
+
+func grokJSONAssistantTexts(payload map[string]any, eventType string) ([]string, bool, bool) {
+	switch eventType {
+	case "text":
+		return collectFirstJSONText(payload, "data", "text"), true, false
+	case "end":
+		return nil, false, true
+	case "error":
+		return collectFirstJSONText(payload, "data", "message", "error", "detail"), false, true
+	}
+	return nil, false, false
+}
+
+func piJSONAssistantTexts(payload map[string]any, eventType string) ([]string, bool, bool) {
+	switch eventType {
+	case "message_update":
+		assistantEvent := jsonMap(payload, "assistantMessageEvent")
+		if strings.EqualFold(strings.TrimSpace(jsonString(assistantEvent, "type")), "text_delta") {
+			return collectFirstJSONText(assistantEvent, "delta", "text"), true, false
+		}
+	case "turn_end", "message_end":
+		message := jsonMap(payload, "message")
+		return collectJSONText(message["content"]), false, true
+	case "agent_end":
+		return piAgentEndText(payload), false, true
+	case "error", "auto_retry_end":
+		return collectFirstJSONText(payload, "message", "finalError", "error"), false, true
+	}
+	return nil, false, false
+}
+
+func piAgentEndText(payload map[string]any) []string {
+	messages, ok := payload["messages"].([]any)
+	if !ok || len(messages) == 0 {
+		return nil
+	}
+	for i := len(messages) - 1; i >= 0; i-- {
+		message, ok := messages[i].(map[string]any)
+		if !ok {
+			continue
+		}
+		if !strings.EqualFold(strings.TrimSpace(jsonString(message, "role")), "assistant") {
+			continue
+		}
+		if text := collectJSONText(message["content"]); len(text) > 0 {
+			return text
+		}
+	}
+	return nil
+}
+
+func acpxJSONAssistantTexts(payload map[string]any, eventType string) ([]string, bool, bool) {
+	switch eventType {
+	case "acpx.text_delta":
+		channel := strings.ToLower(strings.TrimSpace(firstNonEmpty(jsonString(payload, "channel"), jsonString(payload, "stream"))))
+		if channel == "thought" || channel == "thinking" {
+			return nil, true, false
+		}
+		return collectFirstJSONText(payload, "text", "delta"), true, false
+	case "text_delta", "message_delta":
+		return collectFirstJSONText(payload, "text", "delta"), true, false
+	case "message":
+		if strings.EqualFold(strings.TrimSpace(jsonString(payload, "role")), "assistant") {
+			return collectJSONText(payload["content"]), false, true
+		}
+	case "assistant":
+		return collectJSONText(payload["message"]), false, true
+	case "acpx.result", "result", "done":
+		return collectFirstJSONText(payload, "summary", "text", "result", "stopReason"), false, true
+	case "acpx.error", "error":
+		return collectFirstJSONText(payload, "message", "error", "detail", "code"), false, true
+	}
+	return nil, false, false
+}
+
+func paperclipJSONSessionID(payload map[string]any) string {
+	for _, key := range []string{
+		"session_id",
+		"sessionId",
+		"sessionID",
+		"thread_id",
+		"checkpoint_id",
+		"acpSessionId",
+		"agentSessionId",
+		"runtimeSessionName",
+	} {
+		if value := strings.TrimSpace(jsonString(payload, key)); value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func jsonString(payload map[string]any, key string) string {
+	if payload == nil {
+		return ""
+	}
+	value := payload[key]
+	switch typed := value.(type) {
+	case string:
+		return typed
+	case float64:
+		return strconv.FormatFloat(typed, 'f', -1, 64)
+	case bool:
+		if typed {
+			return "true"
+		}
+		return "false"
+	default:
+		return ""
+	}
+}
+
+func jsonMap(payload map[string]any, key string) map[string]any {
+	if payload == nil {
+		return nil
+	}
+	value, _ := payload[key].(map[string]any)
+	return value
+}
+
+func collectFirstJSONText(payload map[string]any, keys ...string) []string {
+	for _, key := range keys {
+		if value := strings.TrimSpace(jsonString(payload, key)); value != "" {
+			return []string{value}
+		}
+		if nested := collectJSONText(payload[key]); len(nested) > 0 {
+			return nested
+		}
+	}
+	return nil
+}
+
+func collectJSONText(value any) []string {
+	switch typed := value.(type) {
+	case string:
+		if text := strings.TrimSpace(typed); text != "" {
+			return []string{text}
+		}
+	case []any:
+		out := make([]string, 0, len(typed))
+		for _, item := range typed {
+			out = append(out, collectJSONText(item)...)
+		}
+		return out
+	case map[string]any:
+		for _, key := range []string{"text", "content", "delta", "data", "summary", "result", "message", "error", "detail", "code"} {
+			if value := strings.TrimSpace(jsonString(typed, key)); value != "" {
+				return []string{value}
+			}
+		}
+		if content, ok := typed["content"]; ok {
+			return collectJSONText(content)
+		}
+	}
+	return nil
 }
 
 func codexAssistantText(envelope codexExecEnvelope) string {

@@ -4,7 +4,7 @@ AgenLeash 是给 `AgenDash` 或其他前端消费的轻量级 Code Agent Runtime
 
 它负责：
 
-- 启动并托管 `codex`、`claude` 这类本地 code agent 进程
+- 启动并托管 `codex`、`claude`、`opencode`、`cursor`、`gemini`、`grok`、`pi`、`acpx` 这类本地 code agent 进程
 - 统一输出会话、消息、工作区与事件流
 - 发现本机已有的 `.codex` / `.claude` 历史会话
 - 通过 HTTP + WebSocket 暴露远程可控的会话接口

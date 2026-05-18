@@ -2,7 +2,7 @@
 
 AgenLeash is a lightweight Code Agent runtime gateway that starts, supervises, and normalizes local coding agents into secure HTTP and WebSocket sessions for AgenDash and compatible clients.
 
-It does not run AI inference itself. Its job is to turn tools such as Codex, Claude Code, OpenCode, and other command-line coding agents into a stable service boundary that desktop, web, and voice clients can control.
+It does not run AI inference itself. Its job is to turn tools such as Codex, Claude Code, OpenCode, Cursor CLI, Gemini CLI, Grok Build, Pi, ACPX, and other command-line coding agents into a stable service boundary that desktop, web, and voice clients can control.
 
 ## What It Does
 
@@ -104,9 +104,14 @@ Adapter specs live in [adapters](adapters). They describe how AgenLeash starts a
 
 Built-in adapters:
 
-- `codex`
-- `claudecode`
-- `opencode`
+- `codex` / `codex_local`
+- `claudecode` / `claude_local`
+- `opencode` / `opencode_local`
+- `cursor`
+- `gemini_local`
+- `grok_local`
+- `pi_local`
+- `acpx_local`
 - `mock-adapter`
 
 See [docs/ADAPTER_SCHEMA.md](docs/ADAPTER_SCHEMA.md) and [docs/FEATURE_REGISTRY.md](docs/FEATURE_REGISTRY.md) for the schema and standard feature keys.

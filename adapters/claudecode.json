@@ -5,7 +5,7 @@
     "name": "claudecode",
     "displayName": "Claude Code",
     "schemaVersion": 1,
-    "adapterRevision": 3
+    "adapterRevision": 4
   },
   "spec": {
     "agentFamily": "claudecode",
@@ -90,10 +90,11 @@
             "mode": "stdio",
             "entrypoint": "claude",
             "args": [
-              "-p",
-              "--verbose",
+              "--print",
+              "-",
               "--output-format",
               "stream-json",
+              "--verbose",
               "--dangerously-skip-permissions"
             ],
             "env": {
@@ -131,10 +132,11 @@
             "mode": "stdio",
             "entrypoint": "claude",
             "args": [
-              "-p",
-              "--verbose",
+              "--print",
+              "-",
               "--output-format",
               "stream-json",
+              "--verbose",
               "--dangerously-skip-permissions"
             ],
             "env": {

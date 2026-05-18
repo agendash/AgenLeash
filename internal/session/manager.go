@@ -66,6 +66,8 @@ func defaultRuntimeFactory(spec runtime.Spec) (runtime.Runtime, error) {
 		return runtime.NewPTYRuntime(), nil
 	case "stdio":
 		return runtime.NewSTDIORuntime(), nil
+	case runtime.PromptArgMode:
+		return runtime.NewPromptArgRuntime(), nil
 	default:
 		return nil, fmt.Errorf("unsupported runtime mode %q", spec.Mode)
 	}
