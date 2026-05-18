@@ -984,6 +984,10 @@ func (a *App) pumpSession(sess *session.Session, spec adapter.EffectiveSpec) {
 					continue
 				}
 			}
+			if suppressUnstructuredRuntimeOutput(spec) {
+				_ = a.persistSessionSnapshot(snapshot, false)
+				continue
+			}
 
 			text := sanitizeOutputText(evt.Data)
 			if preview := outputPreview(text); preview != "" {
@@ -1403,6 +1407,10 @@ func isOpencodeRunJSON(spec adapter.EffectiveSpec) bool {
 	return strings.EqualFold(strings.TrimSpace(spec.AdapterName), "opencode") &&
 		strings.EqualFold(strings.TrimSpace(stringValue(spec.EventParser.Type)), "jsonl_events") &&
 		strings.EqualFold(strings.TrimSpace(stringValue(spec.EventParser.Profile)), "opencode_run")
+}
+
+func suppressUnstructuredRuntimeOutput(spec adapter.EffectiveSpec) bool {
+	return isCodexExecJSON(spec) || isOpencodeRunJSON(spec)
 }
 
 type codexExecEnvelope struct {

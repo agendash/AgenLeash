@@ -573,8 +573,35 @@ func SessionSummaryFromModel(session model.Session, now time.Time) SessionSummar
 		Conversation:      ConversationSummary{NativeID: session.NativeConversationID, StartMode: session.StartMode, ResumeStrategy: session.ResumeStrategy},
 		Workspace:         WorkspaceSummary{CWD: session.WorkspacePath, Root: session.WorkspaceRoot, Fingerprint: session.WorkspaceFingerprint, GitRoot: session.GitRoot, GitBranch: session.GitBranch},
 		Highlight:         model.HighlightForSession(session, now),
-		LastOutputPreview: session.LastOutputPreview,
+		LastOutputPreview: displayOutputPreview(session.LastOutputPreview),
 	}
+}
+
+func displayOutputPreview(preview string) string {
+	trimmed := strings.TrimSpace(preview)
+	if isRuntimeDiagnosticPreview(trimmed) {
+		return ""
+	}
+	return trimmed
+}
+
+func isRuntimeDiagnosticPreview(preview string) bool {
+	if preview == "" {
+		return false
+	}
+	lower := strings.ToLower(preview)
+	if lower == "reading prompt from stdin..." ||
+		lower == "reading additional input from stdin..." ||
+		strings.HasPrefix(lower, "reading prompt from stdin...") ||
+		strings.HasPrefix(lower, "reading additional input from stdin...") {
+		return true
+	}
+	if strings.Contains(lower, "codex_core_skills::manager") ||
+		strings.Contains(lower, "codex_models_manager::manager") {
+		return true
+	}
+	return strings.HasPrefix(lower, "202") &&
+		(strings.Contains(lower, " error codex_") || strings.Contains(lower, " warn codex_"))
 }
 
 func sessionPriority(session model.Session, now time.Time) (int, time.Time) {

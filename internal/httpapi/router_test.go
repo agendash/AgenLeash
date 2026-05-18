@@ -263,6 +263,24 @@ func TestRouterGetSessionDetail(t *testing.T) {
 	}
 }
 
+func TestSessionSummarySuppressesRuntimeDiagnosticPreview(t *testing.T) {
+	session := model.Session{
+		ID:                "sess_noise",
+		Adapter:           "codex",
+		LastOutputPreview: "Reading prompt from stdin...\n2026-05-18T07:31:08.226449Z ERROR codex_core_skills::manager: failed to install system skills",
+	}
+	summary := SessionSummaryFromModel(session, time.Now().UTC())
+	if summary.LastOutputPreview != "" {
+		t.Fatalf("last_output_preview = %q, want empty", summary.LastOutputPreview)
+	}
+
+	session.LastOutputPreview = "Latest agent reply preview"
+	summary = SessionSummaryFromModel(session, time.Now().UTC())
+	if summary.LastOutputPreview != session.LastOutputPreview {
+		t.Fatalf("last_output_preview = %q, want %q", summary.LastOutputPreview, session.LastOutputPreview)
+	}
+}
+
 func TestRouterGetSessionFilePreview(t *testing.T) {
 	st := store.NewMemoryStore()
 	session := model.Session{

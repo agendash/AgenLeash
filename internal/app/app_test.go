@@ -606,6 +606,61 @@ func TestConsumeCodexJSONOutputPublishesAssistantMessageAndBindsThread(t *testin
 	}
 }
 
+func TestPumpSessionSuppressesCodexUnstructuredRuntimeOutput(t *testing.T) {
+	rtEvents := make(chan agenruntime.Event, 2)
+	rt := &capturingRuntime{events: rtEvents}
+	sess, err := session.New(
+		context.Background(),
+		session.StartRequest{
+			ID:             "sess_codex_noise",
+			Adapter:        "codex",
+			RuntimeMode:    "stdio",
+			ConversationID: "conv_codex_noise",
+			WorkspaceID:    "ws_codex_noise",
+			WorkspacePath:  t.TempDir(),
+		},
+		rt,
+		16,
+	)
+	if err != nil {
+		t.Fatalf("session.New() error = %v", err)
+	}
+
+	hub := event.NewHub(32)
+	app := &App{
+		Store: store.NewMemoryStore(),
+		Hub:   hub,
+	}
+	sub := hub.Subscribe("sess_codex_noise")
+	defer sub.Close()
+
+	rtEvents <- agenruntime.Event{
+		Kind: agenruntime.EventKindOutput,
+		Data: []byte("Reading prompt from stdin...\n2026-05-18T07:31:08.226449Z ERROR codex_core_skills::manager: failed to install system skills\n"),
+	}
+	close(rtEvents)
+
+	app.pumpSession(sess, codexJSONEffectiveSpec())
+
+	if got := sess.Snapshot().LastOutputPreview; got != "" {
+		t.Fatalf("last output preview = %q, want empty", got)
+	}
+
+	for len(sub.Recent) > 0 {
+		evt := sub.Recent[0]
+		sub.Recent = sub.Recent[1:]
+		if evt.MsgType == event.MsgTypeMessageDelta {
+			t.Fatalf("unexpected message delta for runtime noise: %q", evt.Delta)
+		}
+	}
+	for len(sub.C) > 0 {
+		evt := <-sub.C
+		if evt.MsgType == event.MsgTypeMessageDelta {
+			t.Fatalf("unexpected message delta for runtime noise: %q", evt.Delta)
+		}
+	}
+}
+
 func TestRefreshHistoryPrunesDeletedDiscoveredSessions(t *testing.T) {
 	claudeHome := filepath.Join(t.TempDir(), ".claude")
 	workspaceOne := filepath.Join(t.TempDir(), "workspace-one")
@@ -1121,6 +1176,18 @@ func TestSessionSubmitByteUsesCarriageReturnForTTY(t *testing.T) {
 func TestSessionSubmitByteFallsBackToNewline(t *testing.T) {
 	if got := sessionSubmitByte(nil, "missing"); got != '\n' {
 		t.Fatalf("sessionSubmitByte() = %q, want newline", got)
+	}
+}
+
+func codexJSONEffectiveSpec() adapter.EffectiveSpec {
+	parserType := "jsonl_events"
+	parserProfile := "codex_exec"
+	return adapter.EffectiveSpec{
+		AdapterName: "codex",
+		EventParser: adapter.EventParserSpec{
+			Type:    &parserType,
+			Profile: &parserProfile,
+		},
 	}
 }
 
